@@ -136,9 +136,12 @@ function pathOf(req: IncomingMessage): { pathname: string; query: URLSearchParam
   // path and the query string, both of which split out by hand.
   const rawUrl = req.url ?? '/';
   const q = rawUrl.indexOf('?');
-  if (q < 0) return { pathname: rawUrl, query: new URLSearchParams() };
+  if (q < 0) return { pathname: rawUrl, query: EMPTY_QUERY };
   return { pathname: rawUrl.slice(0, q), query: new URLSearchParams(rawUrl.slice(q + 1)) };
 }
+
+/** Shared by every request without a query string (only read, never mutated). */
+const EMPTY_QUERY = new URLSearchParams();
 
 function decodeSegment(segment: string): string {
   if (!segment.includes('%')) return segment;
@@ -413,7 +416,7 @@ async function handleGitReceivePack(store: Store, repo: Repo, raw: Buffer, res: 
 /** Build the server. It binds nothing until the caller listens. */
 export function createApp(): Server {
   const store = new Store();
-  return createServer((req: IncomingMessage, res: ServerResponse) => {
+  const server = createServer((req: IncomingMessage, res: ServerResponse) => {
     void (async () => {
       const method = req.method ?? 'GET';
       const { pathname, query } = pathOf(req);
@@ -566,6 +569,10 @@ export function createApp(): Server {
           const repoName = restPath[2]!;
           const tail = restPath.slice(3);
           const done = (result: rest.RestResult): void => {
+            if (result.buffer) {
+              sendBuffer(res, result.status, result.buffer, JSON_TYPE, result.headers);
+              return;
+            }
             sendJson(res, result.status, result.body, result.headers);
           };
 
@@ -642,4 +649,8 @@ export function createApp(): Server {
       }
     });
   });
+  // Small replies must not wait on Nagle: the bench is thousands of tiny
+  // request/response pairs, and a delayed ACK would cost a round trip each.
+  server.on('connection', (socket) => socket.setNoDelay(true));
+  return server;
 }

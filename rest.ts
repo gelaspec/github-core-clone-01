@@ -7,6 +7,8 @@ import { decodeGlobalId, globalId, type Issue, type Pull, type Repo, type Store 
 export interface RestResult {
   status: number;
   body?: unknown;
+  /** A pre-built JSON body (the cached issue JSON): sent verbatim, no re-stringify. */
+  buffer?: Buffer;
   headers?: Record<string, string>;
 }
 
@@ -336,7 +338,8 @@ export function createIssue(store: Store, owner: string, name: string, body: Rec
     if (!repo.labels.has(label)) return unprocessable(`label ${label} does not exist`);
   }
   const issue = store.createIssue(repo, title, typeof body.body === 'string' ? body.body : '', labels);
-  return { status: 201, body: store.issueObject(repo, issue) };
+  // The 201 body is the issue's JSON, already built and cached by the store.
+  return { status: 201, buffer: store.issueJson(repo, issue) };
 }
 
 /** GET /api/v3/repos/{owner}/{repo}/issues — state/sort/direction, per_page/page. */
